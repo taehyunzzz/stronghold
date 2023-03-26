@@ -5,7 +5,7 @@ rm -rf /tmp/ray_ssd/*
 rm -rf ./checkpoints/* 
 
 # CUDA
-export CUDA_HOME=/usr/local/cuda/
+export CUDA_HOME=/usr/local/cuda-11.3/
 # MPS
 export CUDA_MPS_PIPE_DIRECTORY=/tmp/mps/nvidia-mps
 export CUDA_MPS_LOG_DIRECTORY=/tmp/mps/nvidia-log
@@ -18,30 +18,36 @@ export PYTORCH_JIT=0
 RANK=0
 WORLD_SIZE=1
 export MASTER_ADDR=localhost
-export MASTER_PORT=6001
+export MASTER_PORT=8887
 GPUS_PER_NODE=1
 export CUDA_VISIBLE_DEVICES=`seq -s ',' 0 1 $(( $GPUS_PER_NODE-1 ))`
 
 # Data
-_BASE=/home/sys/STRONGHOLD/data
-DATA_PATH=${_BASE}/my-gpt2-en_text_document
-VOCAB_PATH=${_BASE}/gpt2-vocab.json
-MERGE_PATH=${_BASE}/gpt2-merges.txt
+_BASE=/home/kimth/workspace/stronghold
+DATA_PATH=${_BASE}/data/wikitext-2-v1/preprocessed_text_document
+# DATA_PATH=${_BASE}/data/openwebtext/openwebtext.txt
+VOCAB_PATH=${_BASE}/gpt2config/gpt2-vocab.json
+MERGE_PATH=${_BASE}/gpt2config/gpt2-merges.txt
 CHECKPOINT_PATH=./checkpoints/gpt2
 
 # Todo. Hard code. @gl
-PYTHON_LIB=/usr/local/lib/python3.8/dist-packages
+PYTHON_LIB=/home/kimth/tools/miniconda3/envs/venv/lib/python3.10/site-packages
 cp ./scripts/distributed_c10d._gl_.py ${PYTHON_LIB}/torch/distributed/distributed_c10d.py
 cp ./scripts/deepspeed_cpu_adam._gl_.py ${PYTHON_LIB}/deepspeed/ops/adam/cpu_adam.py
 
 # Model defination
-NUM_LAYERS=${1-24}
-HIDDEN_SIZE=${2-2560}
-HEADS=${3-16}
-SEQ_LEN=${4-1024}
-BATCH_SIZE=${5-4}
+#NUM_LAYERS=${1-24}
+#HIDDEN_SIZE=${2-2560}
+#HEADS=${3-16}
+#SEQ_LEN=${4-1024}
+#BATCH_SIZE=${5-4}
+NUM_LAYERS=6
+HIDDEN_SIZE=128
+HEADS=16
+SEQ_LEN=16
+BATCH_SIZE=1
 
-WINDOW_SIZE=${6-4}
+WINDOW_SIZE=5
 
 # GLOBAL_BATCH_SIZE=$((8 * ${BATCH_SIZE} * ${WORLD_SIZE}))
 GLOBAL_BATCH_SIZE=${BATCH_SIZE}
