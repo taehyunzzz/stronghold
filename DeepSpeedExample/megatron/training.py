@@ -478,11 +478,28 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
     global_batch_size = args.batch_size * data_parallel_size
     while iteration < args.train_iters and \
         (args.train_tokens is None or args.tokens < args.train_tokens):
-        loss_dict, skipped_iter = train_step(forward_step_func,
-                                             train_data_iterator,
-                                             model,
-                                             optimizer,
-                                             lr_scheduler)
+
+        import torch.profiler as profiler
+        from torch.profiler import profile, record_function, ProfilerActivity
+
+        do_profile = True
+        if do_profile :
+            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                record_shapes=True, profile_memory=True) as prof:
+                loss_dict, skipped_iter = train_step(forward_step_func,
+                                                    train_data_iterator,
+                                                    model,
+                                                    optimizer,
+                                                    lr_scheduler)
+                                                    
+            prof.export_chrome_trace("trace/zo_train_iter{}_trace.json".format(iteration))
+        else :
+            loss_dict, skipped_iter = train_step(forward_step_func,
+                                                train_data_iterator,
+                                                model,
+                                                optimizer,
+                                                lr_scheduler)
+
         iteration += 1
         if args.curriculum_learning:
             args.tokens += global_batch_size * args.curriculum_seqlen

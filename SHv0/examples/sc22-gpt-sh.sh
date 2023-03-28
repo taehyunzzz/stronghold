@@ -18,7 +18,7 @@ export PYTORCH_JIT=0
 RANK=0
 WORLD_SIZE=1
 export MASTER_ADDR=localhost
-export MASTER_PORT=8887
+export MASTER_PORT=8888
 GPUS_PER_NODE=1
 export CUDA_VISIBLE_DEVICES=`seq -s ',' 0 1 $(( $GPUS_PER_NODE-1 ))`
 
@@ -41,13 +41,16 @@ cp ./scripts/deepspeed_cpu_adam._gl_.py ${PYTHON_LIB}/deepspeed/ops/adam/cpu_ada
 #HEADS=${3-16}
 #SEQ_LEN=${4-1024}
 #BATCH_SIZE=${5-4}
-NUM_LAYERS=6
-HIDDEN_SIZE=128
+NUM_LAYERS=10
+HIDDEN_SIZE=1024
 HEADS=16
-SEQ_LEN=16
+SEQ_LEN=1024
 BATCH_SIZE=1
+TRAIN_ITERS=20
 
 WINDOW_SIZE=5
+
+LOG_INTERVAL=1
 
 # GLOBAL_BATCH_SIZE=$((8 * ${BATCH_SIZE} * ${WORLD_SIZE}))
 GLOBAL_BATCH_SIZE=${BATCH_SIZE}
@@ -60,8 +63,8 @@ CMD="PYTHONGIL=1 python pretrain_gpt.py \
        --micro-batch-size ${BATCH_SIZE} \
        --global-batch-size ${GLOBAL_BATCH_SIZE} \
        --max-position-embeddings ${SEQ_LEN} \
-       --train-iters 50 \
-       --log-interval 10 \
+       --train-iters $TRAIN_ITERS \
+       --log-interval $LOG_INTERVAL \
        --exit-interval 50 \
        --lr-decay-iters 320000 \
        --save $CHECKPOINT_PATH \
@@ -78,19 +81,22 @@ CMD="PYTHONGIL=1 python pretrain_gpt.py \
        --lr-warmup-fraction .01 \
        --weight-decay 1e-2 \
        --clip-grad 1.0 \
-       --log-interval 10 \
        --save-interval 10000 \
        --eval-interval 1000 \
        --eval-iters 1000 \
        --checkpoint-activations \
        --activations-checkpoint-method 'uniform' \
        --activations-checkpoint-num-layers 1 \
-       --enable-gl \
        --use-cpu-initialization \
+       --enable-gl \
        --gl-world-size ${WORLD_SIZE} \
        --gl-window-size ${WINDOW_SIZE} \
        --gl-ray-max-concurrency 12
        "
+       # --enable-gl \
+       # --gl-world-size ${WORLD_SIZE} \
+       # --gl-window-size ${WINDOW_SIZE} \
+       # --gl-ray-max-concurrency 12
 
 echo $CMD
 eval $CMD

@@ -4,19 +4,22 @@ rm -rf ./checkpoints/*
 
 GPUS_PER_NODE=1
 # Change for multinode config
-MASTER_ADDR=localhost
-MASTER_PORT=6000
-NNODES=1
-NODE_RANK=0
-WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
+export MASTER_ADDR=localhost
+export MASTER_PORT=8891
+export RANK=0
+export LOCAL_RANK=0
+export NNODES=1
+export NODE_RANK=0
+export WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 
 export DLWS_NUM_WORKER=${NNODES}
 export DLWS_NUM_GPU_PER_WORKER=${GPUS_PER_NODE}
 
-_BASE=/home/sys/STRONGHOLD/data
-DATA_PATH=${_BASE}/my-gpt2-en_text_document
-VOCAB_PATH=${_BASE}/gpt2-vocab.json
-MERGE_PATH=${_BASE}/gpt2-merges.txt
+_BASE=/home/kimth/workspace/stronghold
+# DATA_PATH=${_BASE}/data/openwebtext/openwebtext.txt
+DATA_PATH=${_BASE}/data/wikitext-2-v1/preprocessed_text_document
+VOCAB_PATH=${_BASE}/gpt2config/gpt2-vocab.json
+MERGE_PATH=${_BASE}/gpt2config/gpt2-merges.txt
 CHECKPOINT_PATH=checkpoints/gpt2_ds
 
 script_path=$(realpath $0)
@@ -26,18 +29,23 @@ config_json="$script_dir/ds_zero_stage_2_config.json"
 # Megatron Model Parallelism
 mp_size=1
 
-NLAYERS=${1-24}
-NHIDDEN=${2-2560}
-HEADS=${3-16}
-SEQ=${4-1024}
-BATCHSIZE=${5-4}
+# NLAYERS=${1-24}
+# NHIDDEN=${2-2560}
+# HEADS=${3-16}
+# SEQ=${4-1024}
+# BATCHSIZE=${5-4}
+NLAYERS=10
+NHIDDEN=1024
+HEADS=16
+SEQ=1024
+BATCHSIZE=8
 LOGDIR="tensorboard_data/${NLAYERS}l_${NHIDDEN}h_${NNODES}n_${GPUS_PER_NODE}g_${mp_size}mp_${BATCHSIZE}b_ds4"
 
 #ZeRO Configs
 stage=2
 reduce_scatter=true
 contigious_gradients=true
-rbs=50000000
+rbs=500000
 agbs=5000000000
 
 #Actication Checkpointing and Contigious Memory
@@ -57,8 +65,8 @@ gpt_options=" \
         --seq-length $SEQ \
         --max-position-embeddings $SEQ \
         --batch-size $BATCHSIZE \
-        --train-iters 50 \
-        --log-interval 10 \
+        --train-iters 10 \
+        --log-interval 1 \
         --exit-interval 50 \
         --lr-decay-iters 320000 \
         --save $CHECKPOINT_PATH \
@@ -85,6 +93,7 @@ gpt_options=" \
                 --deepspeed \
                 --deepspeed_config ${config_json} \
                 --zero-stage ${stage} \
+                --cpu-optimizer \
                 --zero-reduce-bucket-size ${rbs} \
                 --zero-allgather-bucket-size ${agbs} 
             "
@@ -131,7 +140,8 @@ fi
 full_options="${gpt_options} ${deepspeed_options} ${chkp_opt}"
 
 export PYTHONGIL=1
-run_cmd="deepspeed --num_nodes ${DLWS_NUM_WORKER} --num_gpus ${DLWS_NUM_GPU_PER_WORKER} pretrain_gpt2.py ${full_options}"
+# run_cmd="deepspeed --num_nodes ${DLWS_NUM_WORKER} --num_gpus ${DLWS_NUM_GPU_PER_WORKER} pretrain_gpt2.py ${full_options}"
+run_cmd="deepspeed --master_port 8892 --include localhost:1 pretrain_gpt2.py ${full_options}"
 echo ${run_cmd}
 eval ${run_cmd}
 

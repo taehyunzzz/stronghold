@@ -354,7 +354,7 @@ def _backward_pre_hook(module, grad_in, grad_out):
 
         if torch._gl_in_warmup:
             s = time.time()
-
+        # before backward call memcpy of next layer to cuda
         futs = [_handler._layer_to_cuda_remote(_which_layer_to_cuda)]
 
         futs += [
@@ -1253,7 +1253,7 @@ class GL_PretrainHanlder:
                             F  F  F  T  T  T  T  T  T  T  T  F
             cpu_post_bwd:   04 04 04 04 04 05 06 07 08 09 10 11
                             F  F  F  F  T  T  T  T  T  T  T  T 
-            """
+            """                         # cpu_pre_bwd and cpu_pose_bwd overlap? 
 
             #print(
             #    f"--- layer={_cur_layer_num}",
@@ -1349,6 +1349,7 @@ def pretrain(
     # ----------- for gl version ----------
     args = parse_args()
     if args.enable_gl:
+
         gl_pretrain(
             train_valid_test_dataset_provider,
             model_provider,
@@ -1357,6 +1358,7 @@ def pretrain(
             extra_args_provider=extra_args_provider,
             args_defaults=args_defaults,
         )
+
         return 0
     # -------------------------------------
 
@@ -2273,9 +2275,25 @@ def train(
             torch._gl_in_warmup = iteration < 2
 
         update_num_microbatches(args.consumed_train_samples)
-        loss_dict, skipped_iter, grad_norm, num_zeros_in_grad = train_step(
-            forward_step_func, train_data_iterator, model, optimizer, lr_scheduler
-        )
+
+        import torch.profiler as profiler
+        from torch.profiler import profile, record_function, ProfilerActivity
+
+        # TAG : train iteration
+        do_profile = True
+        if do_profile :
+            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                record_shapes=True, profile_memory=True) as prof:
+
+                loss_dict, skipped_iter, grad_norm, num_zeros_in_grad = train_step(
+                    forward_step_func, train_data_iterator, model, optimizer, lr_scheduler
+                )
+
+            prof.export_chrome_trace("trace/sh_gl_train_iter{}_trace.json".format(iteration))
+        else :
+            loss_dict, skipped_iter, grad_norm, num_zeros_in_grad = train_step(
+                forward_step_func, train_data_iterator, model, optimizer, lr_scheduler
+            )
 
         # ------ gl version ------
         # torch.cuda.empty_cache()
