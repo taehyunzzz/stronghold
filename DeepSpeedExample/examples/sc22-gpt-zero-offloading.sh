@@ -34,28 +34,71 @@ mp_size=1
 # HEADS=${3-16}
 # SEQ=${4-1024}
 # BATCHSIZE=${5-4}
-NLAYERS=10
+NLAYERS=20
 NHIDDEN=1024
 HEADS=16
 SEQ=1024
-BATCHSIZE=8
+BATCHSIZE=16
 LOGDIR="tensorboard_data/${NLAYERS}l_${NHIDDEN}h_${NNODES}n_${GPUS_PER_NODE}g_${mp_size}mp_${BATCHSIZE}b_ds4"
 
 #ZeRO Configs
 stage=2
 reduce_scatter=true
 contigious_gradients=true
-rbs=500000
+rbs=50000000
 agbs=5000000000
 
 #Actication Checkpointing and Contigious Memory
-chkp_layers=1
-PA=true
-PA_CPU=false
-CC=true
-SYNCHRONIZE=true
+chkp_layers=2
+# PA=true
+PA=false
+PA_CPU=true
+# CC=true
+CC=false
+SYNCHRONIZE=false
 PROFILE=false
 
+
+for chkp_layers in 1
+do
+
+if [ "${chkp_layers}" = "0" ]; then
+        PA_CPU=false
+        echo "CPU activation checkpoint disabled"
+else 
+        PA_CPU=true
+        echo "CPU activation checkpoint enabled"
+
+        chkp_opt=" \
+        --checkpoint-activations \
+        --deepspeed-activation-checkpointing \
+        --checkpoint-num-layers ${chkp_layers}"
+
+        if [ "${PA}" = "true" ]; then
+        chkp_opt="${chkp_opt} \
+                --partition-activations"
+        fi
+
+        if [ "${PA_CPU}" = "true" ]; then
+        chkp_opt="${chkp_opt} \
+                --checkpoint-in-cpu"
+        fi
+
+        if [ "${SYNCHRONIZE}" = "true" ]; then
+        chkp_opt="${chkp_opt} \
+                --synchronize-each-layer"
+        fi
+
+        if [ "${CC}" = "true" ]; then
+        chkp_opt="${chkp_opt} \
+                --contiguous-checkpointing"
+        fi
+
+        if [ "${PROFILE}" = "true" ]; then
+        chkp_opt="${chkp_opt} \
+                --profile-backward"
+        fi
+fi
 
 gpt_options=" \
         --model-parallel-size ${mp_size} \
@@ -108,41 +151,15 @@ deepspeed_options="${deepspeed_options} \
                 --zero-reduce-scatter"
 fi
 
-chkp_opt=" \
---checkpoint-activations \
---checkpoint-num-layers ${chkp_layers}"
-
-if [ "${PA}" = "true" ]; then
-chkp_opt="${chkp_opt} \
-        --partition-activations"
-fi
-
-if [ "${PA_CPU}" = "true" ]; then
-chkp_opt="${chkp_opt} \
-        --checkpoint-in-cpu"
-fi
-
-if [ "${SYNCHRONIZE}" = "true" ]; then
-chkp_opt="${chkp_opt} \
-        --synchronize-each-layer"
-fi
-
-if [ "${CC}" = "true" ]; then
-chkp_opt="${chkp_opt} \
-        --contigious-checkpointing"
-fi
-
-if [ "${PROFILE}" = "true" ]; then
-chkp_opt="${chkp_opt} \
-        --profile-backward"
-fi
-
 full_options="${gpt_options} ${deepspeed_options} ${chkp_opt}"
 
 export PYTHONGIL=1
 # run_cmd="deepspeed --num_nodes ${DLWS_NUM_WORKER} --num_gpus ${DLWS_NUM_GPU_PER_WORKER} pretrain_gpt2.py ${full_options}"
 run_cmd="deepspeed --master_port 8892 --include localhost:1 pretrain_gpt2.py ${full_options}"
 echo ${run_cmd}
-eval ${run_cmd}
+# eval ${run_cmd}
+eval ${run_cmd} > log_ckpt/log_${chkp_layer}ckpts.txt
 
 set +x
+
+done

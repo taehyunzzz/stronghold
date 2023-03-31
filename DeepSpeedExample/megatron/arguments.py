@@ -558,7 +558,7 @@ def _add_activation_checkpoint_args(parser):
                        help='uses activation checkpointing from deepspeed')
     group.add_argument('--partition-activations', action='store_true',
                        help='partition Activations across GPUs before checkpointing.')
-    group.add_argument('--contigious-checkpointing', action='store_true',
+    group.add_argument('--contiguous-checkpointing', action='store_true',
                        help='Contigious memory checkpointing for activatoins.')
     group.add_argument('--checkpoint-in-cpu', action='store_true',
                        help='Move the activation checkpoints to CPU.')

@@ -110,8 +110,9 @@ def setup_deepspeed_random_and_activation_checkpointing(args):
     deepspeed.checkpointing.configure(
         mpu,
         partition_activations=args.partition_activations,
-        contiguous_checkpointing=args.contigious_checkpointing,
-        num_checkpoints=num_layers,
+        contiguous_checkpointing=args.contiguous_checkpointing,
+        # num_checkpoints=num_layers,
+        num_checkpoints=args.checkpoint_num_layers,
         checkpoint_in_cpu=args.checkpoint_in_cpu,
         synchronize=args.synchronize_each_layer,
         profile=args.profile_backward)
@@ -152,8 +153,11 @@ def _initialize_distributed():
         master_ip = os.getenv('MASTER_ADDR', 'localhost')
         master_port = os.getenv('MASTER_PORT', '6000')
         init_method += master_ip + ':' + master_port
-        torch.distributed.init_process_group(
-            backend=args.distributed_backend,
+
+        # torch.distributed.init_process_group(
+        deepspeed.init_distributed(
+            # backend=args.distributed_backend,
+            dist_backend=args.distributed_backend,
             world_size=args.world_size, rank=args.rank,
             init_method=init_method)
 

@@ -37,7 +37,7 @@ NLAYERS=10
 NHIDDEN=1024
 HEADS=16
 SEQ=1024
-BATCHSIZE=8
+BATCHSIZE=16
 LOGDIR="tensorboard_data/${NLAYERS}l_${NHIDDEN}h_${NNODES}n_${GPUS_PER_NODE}g_${mp_size}mp_${BATCHSIZE}b_ds4"
 
 #ZeRO Configs
@@ -49,12 +49,11 @@ agbs=5000000000
 
 #Actication Checkpointing and Contigious Memory
 chkp_layers=1
-PA=true
-PA_CPU=false
-CC=true
-SYNCHRONIZE=true
+PA=false
+PA_CPU=true
+CC=false
+SYNCHRONIZE=false
 PROFILE=false
-
 
 gpt_options=" \
         --model-parallel-size ${mp_size} \
@@ -111,6 +110,7 @@ fi
 
 chkp_opt=" \
 --checkpoint-activations \
+--deepspeed-activation-checkpointing \
 --checkpoint-num-layers ${chkp_layers}"
 
 if [ "${PA}" = "true" ]; then

@@ -10,7 +10,7 @@
     "stage3_prefetch_bucket_size": 5e7,
     "contiguous_gradients": true,
     "overlap_comm": true,
-    "reduce_bucket_size": 90000000,
+    "reduce_bucket_size": 9000000000,
     "sub_group_size": 1e8,
     "offload_optimizer": {
       "device": "cpu",
@@ -41,5 +41,11 @@
     "single_submit": false,
     "overlap_events": true,
     "thread_count": 2
+  },
+  "activation_checkpointing":{
+    "partition_activation": false,
+    "cpu_checkpointing": false,
+    "contiguous_memory_optimization":false,
+    "number_checkpoints": 10
   }
 }

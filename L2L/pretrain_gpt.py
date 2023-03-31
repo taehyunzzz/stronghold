@@ -116,7 +116,8 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
         skip_warmup=(not args.mmap_warmup))
     print_rank_0("> finished creating GPT datasets ...")
 
-    return train_ds, valid_ds, test_ds
+    # return train_ds, valid_ds, test_ds
+    return train_ds, train_ds, train_ds
 
 
 if __name__ == "__main__":

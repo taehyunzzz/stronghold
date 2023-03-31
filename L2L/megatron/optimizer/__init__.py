@@ -371,18 +371,26 @@ def load_utils(args):
             extra_cflags=[
                 "-O3",
                 "-fopenmp",
-                "-lpython3.9m",
-                "-lboost_python-py39",
+                # "-lpython3.9m",
+                # "-lboost_python-py39",
+                "-lpython3.10",
+                "-lboost_python3",
+                "-I/usr/local/cuda-11.3/include/",
+                "-I/usr/local/cuda-11.3/targets/x86_64-linux/include/",
+                "-L/usr/local/cuda-11.3/targets/x86_64-linux/lib/",
                 "-I /usr/local/cuda/include/",
                 "-lcurand",
-                # "-mavx512f -mavx512cd -mavx512dq -mavx512bw -mavx512vl ",
+                "-mavx512f -mavx512cd -mavx512dq -mavx512bw -mavx512vl ",
             ],
             extra_cuda_cflags=[
                 "-O3",
                 "-gencode",
                 "arch=compute_86,code=sm_86",
                 "--use_fast_math",
-                "-I /usr/local/cuda/include/",
+                # "-I /usr/local/cuda/include/",
+                "-I/usr/local/cuda-11.3/include/",
+                "-I/usr/local/cuda-11.3/targets/x86_64-linux/include/",
+                "-L/usr/local/cuda-11.3/targets/x86_64-linux/lib/",
                 "-std=c++17" if sys.platform == "win32" else "-std=c++14",
                 "--default-stream per-thread",
                 "-U__CUDA_NO_HALF_OPERATORS__",
@@ -392,6 +400,15 @@ def load_utils(args):
             ]
             + extra_cuda_flags
             + cc_flag,
+            extra_ldflags=[
+                "-L/usr/local/cuda-11.3/targets/x86_64-linux/lib/",
+                "-lcurand"
+            ],
+            extra_include_paths=[
+                "-I/usr/local/cuda-11.3/include/",
+                "-I/usr/local/cuda-11.3/targets/x86_64-linux/include/",
+                "-lcurand"
+            ],
             verbose=(args.rank == 0),
         )
 

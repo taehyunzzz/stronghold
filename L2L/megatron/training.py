@@ -147,6 +147,9 @@ def pretrain(train_valid_test_dataset_provider,
                           train_data_iterator, valid_data_iterator)
     print_datetime('after training is done')
 
+    import os
+    os._exit(0)
+
     if args.do_valid:
         prefix = 'the end of training for val data'
         evaluate_and_print_results(prefix, forward_step_func,
