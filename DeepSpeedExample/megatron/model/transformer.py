@@ -961,7 +961,7 @@ class ParallelTransformer(MegatronModule):
         l = 0
         while l < self.num_layers:
             hidden_states = mpu.checkpoint(
-                custom(l, l + self.checkpoint_num_layers),
+                custom(l, min(l + self.checkpoint_num_layers, self.num_layers)),
                 hidden_states, attention_mask)
             l += self.checkpoint_num_layers
 

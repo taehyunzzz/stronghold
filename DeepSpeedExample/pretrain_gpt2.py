@@ -53,7 +53,7 @@ def model_provider():
 
     return model
 
-
+# return data of shape (batch size, hidden size)
 def get_batch(data_iterator):
     """Generate a batch"""
     args = get_args()

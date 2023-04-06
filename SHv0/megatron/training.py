@@ -57,6 +57,9 @@ from megatron.utils import report_memory
 from megatron.utils import flops_calculator, throughput_calculator
 from megatron.model import GPTModel, BertModel
 
+import torch.profiler as profiler
+from torch.profiler import profile, record_function, ProfilerActivity
+
 
 # for use 1-v100 server to mock 8-v100 server
 #torch.cuda.set_per_process_memory_fraction(1/8*1.1, 0)
@@ -2275,9 +2278,6 @@ def train(
             torch._gl_in_warmup = iteration < 2
 
         update_num_microbatches(args.consumed_train_samples)
-
-        import torch.profiler as profiler
-        from torch.profiler import profile, record_function, ProfilerActivity
 
         # TAG : train iteration
         do_profile = True

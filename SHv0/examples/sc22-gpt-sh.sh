@@ -41,14 +41,14 @@ cp ./scripts/deepspeed_cpu_adam._gl_.py ${PYTHON_LIB}/deepspeed/ops/adam/cpu_ada
 #HEADS=${3-16}
 #SEQ_LEN=${4-1024}
 #BATCH_SIZE=${5-4}
-NUM_LAYERS=10
+NUM_LAYERS=24
 HIDDEN_SIZE=1024
 HEADS=16
 SEQ_LEN=1024
-BATCH_SIZE=1
+BATCH_SIZE=64
 TRAIN_ITERS=20
 
-WINDOW_SIZE=5
+WINDOW_SIZE=3
 
 LOG_INTERVAL=1
 
@@ -84,15 +84,16 @@ CMD="PYTHONGIL=1 python pretrain_gpt.py \
        --save-interval 10000 \
        --eval-interval 1000 \
        --eval-iters 1000 \
-       --checkpoint-activations \
-       --activations-checkpoint-method 'uniform' \
-       --activations-checkpoint-num-layers 1 \
        --use-cpu-initialization \
        --enable-gl \
        --gl-world-size ${WORLD_SIZE} \
        --gl-window-size ${WINDOW_SIZE} \
        --gl-ray-max-concurrency 12
        "
+       # --checkpoint-activations \
+       # --activations-checkpoint-method 'uniform' \
+       # --activations-checkpoint-num-layers 1 \
+
        # --enable-gl \
        # --gl-world-size ${WORLD_SIZE} \
        # --gl-window-size ${WINDOW_SIZE} \

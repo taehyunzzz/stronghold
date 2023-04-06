@@ -482,7 +482,11 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
         import torch.profiler as profiler
         from torch.profiler import profile, record_function, ProfilerActivity
 
-        do_profile = True
+        if iteration == 0:
+            do_profile = True
+        else :
+            do_profile = False
+        
         if do_profile :
             with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 record_shapes=True, profile_memory=True) as prof:
@@ -491,14 +495,35 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
                                                     model,
                                                     optimizer,
                                                     lr_scheduler)
-                                                    
             prof.export_chrome_trace("trace/zo_train_iter{}_trace.json".format(iteration))
+
         else :
             loss_dict, skipped_iter = train_step(forward_step_func,
                                                 train_data_iterator,
                                                 model,
                                                 optimizer,
                                                 lr_scheduler)
+        def report_memory(name="[MEMORY REPORT]"):
+            """Simple GPU memory report."""
+            mega_bytes = 1024.0 * 1024.0
+            string = name + ' memory (MB)'
+            string += ' | allocated: {}'.format(
+                torch.cuda.memory_allocated() / mega_bytes)
+            string += ' | max allocated: {}'.format(
+                torch.cuda.max_memory_allocated() / mega_bytes)
+            string += ' | reserved: {}'.format(
+                torch.cuda.memory_reserved() / mega_bytes)
+            string += ' | max reserved: {}'.format(
+                torch.cuda.max_memory_reserved() / mega_bytes)
+            if mpu.get_data_parallel_rank() == 0:
+                print("[Rank {}] {}".format(torch.distributed.get_rank(), string),
+                        flush=True)
+
+        if iteration == 0 :
+            torch.cuda.reset_peak_memory_stats()
+        if iteration == 1 :
+            report_memory()
+
 
         iteration += 1
         if args.curriculum_learning:

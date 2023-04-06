@@ -34,11 +34,11 @@ mp_size=1
 # HEADS=${3-16}
 # SEQ=${4-1024}
 # BATCHSIZE=${5-4}
-NLAYERS=20
+NLAYERS=50
 NHIDDEN=1024
 HEADS=16
 SEQ=1024
-BATCHSIZE=16
+# BATCHSIZE=4
 LOGDIR="tensorboard_data/${NLAYERS}l_${NHIDDEN}h_${NNODES}n_${GPUS_PER_NODE}g_${mp_size}mp_${BATCHSIZE}b_ds4"
 
 #ZeRO Configs
@@ -49,30 +49,36 @@ rbs=50000000
 agbs=5000000000
 
 #Actication Checkpointing and Contigious Memory
-chkp_layers=2
+# chkp_layers=2
 # PA=true
 PA=false
-PA_CPU=true
+# PA_CPU=true
+# PA_CPU=false
 # CC=true
 CC=false
 SYNCHRONIZE=false
 PROFILE=false
+ITERATIONS=3
 
-
-for chkp_layers in 1
+for BATCHSIZE in 4 16 32
+do
+for chkp_layers in 0 1 20
+do
+for PA_CPU in false true
 do
 
 if [ "${chkp_layers}" = "0" ]; then
-        PA_CPU=false
+        # PA_CPU=false
         echo "CPU activation checkpoint disabled"
 else 
-        PA_CPU=true
+        # PA_CPU=true
         echo "CPU activation checkpoint enabled"
 
         chkp_opt=" \
         --checkpoint-activations \
         --deepspeed-activation-checkpointing \
-        --checkpoint-num-layers ${chkp_layers}"
+        --checkpoint-num-layers ${chkp_layers} \
+        --split-transformers"
 
         if [ "${PA}" = "true" ]; then
         chkp_opt="${chkp_opt} \
@@ -108,7 +114,7 @@ gpt_options=" \
         --seq-length $SEQ \
         --max-position-embeddings $SEQ \
         --batch-size $BATCHSIZE \
-        --train-iters 10 \
+        --train-iters $ITERATIONS \
         --log-interval 1 \
         --exit-interval 50 \
         --lr-decay-iters 320000 \
@@ -126,7 +132,6 @@ gpt_options=" \
         --weight-decay 1e-2 \
         --clip-grad 1.0 \
         --warmup 0.01 \
-        --checkpoint-activations \
         --save-interval 10000 \
         --eval-interval 1000 \
         --eval-iters 1000
@@ -158,8 +163,10 @@ export PYTHONGIL=1
 run_cmd="deepspeed --master_port 8892 --include localhost:1 pretrain_gpt2.py ${full_options}"
 echo ${run_cmd}
 # eval ${run_cmd}
-eval ${run_cmd} > log_ckpt/log_${chkp_layer}ckpts.txt
+eval ${run_cmd} > log_ckpt/log_BATCH${BATCHSIZE}_CKPT${chkp_layers}_CPU${PA_CPU}.txt
 
 set +x
 
+done
+done
 done
