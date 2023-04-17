@@ -557,6 +557,8 @@ def _get_item_from_cpu_cache(_cpu_cache, key, value=None):
         ## ----------------
         return _cpu_cache[key]
 
+    if key == 45 :
+        pass
     _cpu_cache[key] = torch.zeros(
         value.size(),
         dtype=value.dtype,

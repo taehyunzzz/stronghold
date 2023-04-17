@@ -535,7 +535,21 @@ class ParallelTransformerLayer(MegatronModule):
             )
 
         # MLP
-        self.mlp = ParallelMLP(init_method, output_layer_init_method)
+
+        is_moe = True
+        if is_moe :
+            import moe
+            from moe import MoE
+            num_experts = 2
+            k = 1
+
+            self.mlp = MoE(args.hidden_size, args.hidden_size, 
+                            num_experts, args.ffn_hidden_size, 
+                            noisy_gating=True, k=k,
+                            expert_module=ParallelMLP(init_method, output_layer_init_method))
+
+        else :
+            self.mlp = ParallelMLP(init_method, output_layer_init_method)
 
     def forward(
         self,

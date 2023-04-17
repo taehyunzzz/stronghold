@@ -60,6 +60,48 @@ def model_provider(pre_process=True, post_process=True):
     # for module_name, module in unwrapped_model.named_modules():
     #     print(f"{module_name}:\n\tparam_count={_param_count(module)}, param_ratio={round(_param_count(module)/_param_sum * 100, 4)}%")
 
+    # def model2moe(model, hidden_size, intermediate_size, num_experts, k):
+    #     print("Converting to MoE model")
+
+    #     mlp_list = []
+    #     for n,p in model.named_modules():
+    #         if n.split(".")[-1] == "mlp":
+    #             mlp_list.append((n,p))
+
+    #     for mlp_idx in range(len(mlp_list)):
+    #         mlp_layer = mlp_list[mlp_idx]
+    #         model_obj = model
+    #         for n, word in enumerate(mlp_layer[0].split(".")):
+    #             if word == "mlp":
+    #                 from moe import MoE
+    #                 setattr(model_obj, word,
+    #                     MoE(hidden_size, hidden_size, 
+    #                         num_experts, intermediate_size, 
+    #                         k=k, noisy_gating=True,
+    #                         expert_module=mlp_layer[1]
+    #                         ))
+    #                 break
+    #             elif word.isnumeric():
+    #                 model_obj = model_obj[int(word)]
+    #             else :
+    #                 model_obj = getattr(model_obj, word)
+    #     total=0
+    #     for n,p in model.named_parameters():
+    #         total += p.numel()
+    #     # print(total)
+
+    #     return model
+
+    # args = get_args()
+    # hidden_size = args.hidden_size
+    # intermediate_size = args.ffn_hidden_size
+    # model = model2moe(model, 
+    #                   hidden_size,
+    #                   intermediate_size,
+    #                   num_experts=10, 
+    #                   k=1
+    #                   )
+
     return model
 
 
