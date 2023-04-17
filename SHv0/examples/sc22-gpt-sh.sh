@@ -41,7 +41,7 @@ cp ./scripts/deepspeed_cpu_adam._gl_.py ${PYTHON_LIB}/deepspeed/ops/adam/cpu_ada
 #HEADS=${3-16}
 #SEQ_LEN=${4-1024}
 #BATCH_SIZE=${5-4}
-NUM_LAYERS=5
+NUM_LAYERS=7
 HIDDEN_SIZE=1536
 HEADS=16
 SEQ_LEN=1024

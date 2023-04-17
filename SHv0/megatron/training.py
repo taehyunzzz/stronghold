@@ -362,6 +362,7 @@ def _backward_pre_hook(module, grad_in, grad_out):
 
         futs += [
             _handler._layer_move_save_for_backward_to_remote(
+                # layer_num              # device                                   #action #index          
                 _which_layer_to_cuda, _layers[_which_layer_to_cuda]._gl_cuda_device, 'c2g', i
             )
             for i in reversed(
@@ -1018,6 +1019,8 @@ class GL_PretrainHanlder:
                             f"--- init cpu_cache for save_for_backward tensors ",
                             f"in layer-{_layer._gl_layer_num}",
                         )
+                        print("Inserting index {} to layer {}'s cpu cache"
+                              .format(index,layer_num))
                         _cpu_cache[index] = torch.empty(
                             tensor.size(),
                             dtype=tensor.dtype,
@@ -1061,6 +1064,8 @@ class GL_PretrainHanlder:
                  
                     _cpu_cache = _layer._gl_save_for_backward_cpu_cache
                     
+                    print("Layernum {}, Have indices : {}, Inserting indices {}"\
+                          .format(layer_num, _cpu_cache.keys(), index))
                     packed[1] = _get_item_from_cpu_cache(_cpu_cache, index).to(
                         tensor_device, non_blocking=True
                     )  # non_blocking=non_blocking
