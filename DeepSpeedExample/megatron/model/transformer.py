@@ -57,6 +57,253 @@ torch._C._jit_override_can_fuse_on_gpu(True)
                                      unmaksed-attention-scores, attention-mask)
 """
 
+class SparseDispatcher(object):
+
+    def __init__(self, num_experts, gates):
+
+        self._gates = gates
+        self._num_experts = num_experts
+        # sort experts : rows of (batch index, expert index), there could be multiple experts per batch
+        sorted_experts, index_sorted_experts = torch.nonzero(gates).sort(0)
+        # drop indices
+        _, self._expert_index = sorted_experts.split(1, dim=1)
+        # get according batch index for each expert
+        self._batch_index = torch.nonzero(gates)[index_sorted_experts[:, 1], 0]
+        # calculate num samples that each expert gets
+        self._part_sizes = (gates > 0).sum(0).tolist()
+        # expand gates to match with self._batch_index
+        gates_exp = gates[self._batch_index.flatten()]
+        self._nonzero_gates = torch.gather(gates_exp, 1, self._expert_index)
+
+    def dispatch(self, inp):
+        inp_exp = inp[self._batch_index].squeeze(1)
+        return torch.split(inp_exp, self._part_sizes, dim=0)
+
+    def combine(self, expert_out, multiply_by_gates=True):
+        # print(expert_out)
+        # print(expert_out.shape)
+
+        for n in range(len(expert_out)) :
+            expert_out[n] = expert_out[n].squeeze(0)
+
+            # eout = eout.squeeze(0)
+
+        for eout in expert_out :
+            print(eout.shape)
+
+        import numpy as np
+
+        stitched = torch.cat(expert_out, 0).exp()
+
+        if multiply_by_gates:
+            stitched = stitched.mul(self._nonzero_gates)
+        zeros = torch.zeros(self._gates.size(0), expert_out[-1].size(1), requires_grad=True, device=stitched.device)
+        # combine samples that have been processed by the same k experts
+        combined = zeros.index_add(0, self._batch_index, stitched.float())
+        # add eps to all zero values in order to avoid nans when going back to log space
+        combined[combined == 0] = np.finfo(float).eps
+        # back to log space
+        return combined.log()
+
+    def expert_to_gates(self):
+        return torch.split(self._nonzero_gates, self._part_sizes, dim=0)
+
+class MoE(torch.nn.Module):
+
+    def __init__(self, input_size, output_size, num_experts, intermediate_size, noisy_gating=True, k=4, expert_module=None):
+        super(MoE, self).__init__()
+        args = get_args()
+
+        self.noisy_gating = noisy_gating
+        self.num_experts = num_experts
+
+        assert output_size == input_size, "input size should match output size"
+        self.output_size = output_size
+        self.input_size = input_size
+        self.intermediate_size = intermediate_size
+        self.k = k
+
+        import copy
+        self.experts    = torch.nn.ModuleList([copy.deepcopy(expert_module) for i in range(self.num_experts)])
+        self.w_gate     = torch.nn.Parameter(torch.rand(input_size, num_experts, device=torch.cuda.current_device()), requires_grad=True)
+        self.w_noise    = torch.nn.Parameter(torch.rand(input_size, num_experts, device=torch.cuda.current_device()), requires_grad=True)
+        self.softplus   = torch.nn.Softplus()
+        self.softmax    = torch.nn.Softmax(1)
+        self.register_buffer("mean", torch.tensor([0.0]))
+        self.register_buffer("std", torch.tensor([1.0]))
+        assert(self.k <= self.num_experts)
+
+        self.time_record_mlp = None
+
+    def cv_squared(self, x):
+        eps = 1e-10
+        if x.shape[0] == 1:
+            return torch.tensor([0], device=x.device, dtype=x.dtype)
+        return x.float().var() / (x.float().mean()**2 + eps)
+
+    def _gates_to_load(self, gates):
+        return (gates > 0).sum(0)
+
+    def _prob_in_top_k(self, clean_values, noisy_values, noise_stddev, noisy_top_values):
+        batch = clean_values.size(0)
+        m = noisy_top_values.size(1)
+        top_values_flat = noisy_top_values.flatten()
+
+        threshold_positions_if_in = torch.arange(batch, device=clean_values.device) * m + self.k
+        threshold_if_in = torch.unsqueeze(torch.gather(top_values_flat, 0, threshold_positions_if_in), 1)
+        is_in = torch.gt(noisy_values, threshold_if_in)
+        threshold_positions_if_out = threshold_positions_if_in - 1
+        threshold_if_out = torch.unsqueeze(torch.gather(top_values_flat, 0, threshold_positions_if_out), 1)
+        # is each value currently in the top k.
+        from torch.distributions.normal import Normal
+        normal = Normal(self.mean, self.std)
+        prob_if_in = normal.cdf((clean_values - threshold_if_in)/noise_stddev)
+        prob_if_out = normal.cdf((clean_values - threshold_if_out)/noise_stddev)
+        prob = torch.where(is_in, prob_if_in, prob_if_out)
+        return prob
+
+    def noisy_top_k_gating(self, x, train, noise_epsilon=1e-2):
+        clean_logits = x @ self.w_gate # matmul (batch,seq_len,hidden) x (hidden,experts)
+        if self.noisy_gating and train:
+            raw_noise_stddev = x @ self.w_noise
+            noise_stddev = ((self.softplus(raw_noise_stddev) + noise_epsilon))
+            noisy_logits = clean_logits + (torch.randn_like(clean_logits) * noise_stddev)
+            logits = noisy_logits
+        else:
+            logits = clean_logits
+
+        # calculate topk + 1 that will be needed for the noisy gates
+        top_logits, top_indices = logits.topk(min(self.k + 1, self.num_experts), dim=1)
+        top_k_logits = top_logits[:, :self.k]
+        top_k_indices = top_indices[:, :self.k]
+        top_k_gates = self.softmax(top_k_logits)
+
+        zeros = torch.zeros_like(logits, requires_grad=True)
+        gates = zeros.scatter(1, top_k_indices, top_k_gates)
+
+        if self.noisy_gating and self.k < self.num_experts and train:
+            load = (self._prob_in_top_k(clean_logits, noisy_logits, noise_stddev, top_logits)).sum(0)
+        else:
+            load = self._gates_to_load(gates)
+        return gates, load
+
+    def forward(self, x, loss_coef=1e-2):
+        mode=0
+        if mode == 0:
+
+            # TODO : consider batch_size and sequence size separately
+            x_shape = x.shape
+            
+            x = x.reshape((-1, self.output_size))
+
+            gates, load = self.noisy_top_k_gating(x, self.training)
+            importance = gates.sum(0)
+            loss = self.cv_squared(importance) + self.cv_squared(load)
+            loss *= loss_coef
+
+            dispatcher = SparseDispatcher(self.num_experts, gates) # configure with batch should be dispatched to each expert
+            expert_inputs = dispatcher.dispatch(x) # distribute batch inputs for each expert
+            gates = dispatcher.expert_to_gates() # the weight for each batch on each expert
+
+            expert_outputs = [self.experts[i](expert_inputs[i].unsqueeze(0)) for i in range(self.num_experts)] # for each expert, inference on assorted batch
+            
+            if isinstance(expert_outputs[0],tuple) and len(expert_outputs[0]) == 2:
+                _, mlp_bias = expert_outputs[0]
+                expert_outputs_only = [ex_out for ex_out, _ in expert_outputs]
+
+                y = dispatcher.combine(expert_outputs_only) # get weighted sum of expert outputs
+                y = y.reshape(x_shape)
+                return y , mlp_bias
+
+            else :
+                y = dispatcher.combine(expert_outputs) # get weighted sum of expert outputs
+                y = y.reshape(x_shape)
+                return y, loss
+                # return y #, loss
+
+        elif mode == 1:
+            import time
+            times=[]
+
+            # reshape1
+            times.append(time.time())
+            x_shape = x.shape
+            x = x.reshape((-1, self.output_size))
+
+            # topk
+            times.append(time.time())
+            gates, load = self.noisy_top_k_gating(x, self.training)
+
+            # imp1
+            times.append(time.time())
+            importance = gates.sum(0)
+
+            # imp2
+            times.append(time.time())
+            loss = self.cv_squared(importance) + self.cv_squared(load)
+            loss *= loss_coef
+
+            # init_dispatch
+            times.append(time.time())
+            dispatcher = SparseDispatcher(self.num_experts, gates) # configure with batch should be dispatched to each expert
+
+            # dispatch
+            times.append(time.time())
+            expert_inputs = dispatcher.dispatch(x) # distribute batch inputs for each expert
+
+            # ex_gate
+            times.append(time.time())
+            gates = dispatcher.expert_to_gates() # the weight for each batch on each expert
+
+            # ex_output
+            times.append(time.time())
+            expert_outputs = [self.experts[i](expert_inputs[i]) for i in range(self.num_experts)] # for each expert, inference on assorted batch
+
+            # ex_combine
+            times.append(time.time())
+            y = dispatcher.combine(expert_outputs) # get weighted sum of expert outputs
+
+            # reshape2
+            times.append(time.time())
+            y = y.reshape(x_shape)
+
+            times.append(time.time())
+            self.time_record_mlp = times
+
+            # return y, loss
+            return y, loss
+        '''
+        elif mode == 2:
+            with profiler.record_function("prof_noisy_top_k_gating"):
+                gates, load = self.noisy_top_k_gating(x, self.training)
+
+            # calculate importance loss
+            with profiler.record_function("prof_get_importance"):
+                importance = gates.sum(0)
+            #
+            with profiler.record_function("prof_get_loss"):
+                stream = torch.cuda.Stream()
+                with torch.cuda.stream(stream):
+                    loss = self.cv_squared(importance) + self.cv_squared(load)
+                    loss *= loss_coef
+
+            with profiler.record_function("prof_dispatch"):
+                dispatcher = SparseDispatcher(self.num_experts, gates) # configure with batch should be dispatched to each expert
+                expert_inputs = dispatcher.dispatch(x) # distribute batch inputs for each expert
+
+            with profiler.record_function("prof_expert_to_gates"):
+                gates = dispatcher.expert_to_gates() # the weight for each batch on each expert
+
+            with profiler.record_function("prof_expert_output"):
+                expert_outputs = [self.experts[i](expert_inputs[i]) for i in range(self.num_experts)] # for each expert, inference on assorted batch
+
+            with profiler.record_function("prof_expert_combine"):
+                y = dispatcher.combine(expert_outputs) # get weighted sum of expert outputs
+
+            return y, loss
+        else : assert 0, "Unknown Mode Selected"
+        '''
+
 class ParallelMLP(MegatronModule):
     """MLP.
 
@@ -669,9 +916,29 @@ class ParallelTransformerLayerPart2(MegatronModule):
             args.hidden_size,
             eps=args.layernorm_epsilon)
 
+        # Memory-saving optimization
+        self.scattered_attn_output = args.scattered_embeddings
+
         # MLP
-        self.mlp = ParallelMLP(init_method,
-                               output_layer_init_method)
+        # is_moe=False
+        is_moe=True
+
+        if is_moe :
+            # CONFIGURE MOE PARAMETERS
+            hidden_size = args.hidden_size
+            ffn_hidden_size = 4*hidden_size
+            num_experts = 5
+            k = 1
+
+            self.mlp = MoE(hidden_size,hidden_size, 
+                            num_experts,ffn_hidden_size, 
+                            noisy_gating=True, k=k,
+                            expert_module=ParallelMLP(init_method, output_layer_init_method))
+        else :
+            self.mlp = ParallelMLP(init_method,
+                                output_layer_init_method)
+
+        pass
 
 
     def forward(self, layernorm_input, attention_mask, presents=None, layer_past=None,
@@ -686,7 +953,7 @@ class ParallelTransformerLayerPart2(MegatronModule):
         # Layer norm post the self attention.
         layernorm_output = self.post_attention_layernorm(layernorm_input)
 
-        # MLP.
+        # MLP. input [seq_len,batch,embedding size]
         mlp_output, mlp_bias = self.mlp(layernorm_output)
         
         # Second residual connection.
@@ -795,78 +1062,6 @@ class ParallelTransformerLayerPart1(MegatronModule):
                 self.hidden_dropout)
 
         return layernorm_input
-
-class ParallelTransformerLayerPart2(MegatronModule):
-    """A single transformer layer.
-
-    Transformore layer takes input with size [b, s, h] and returns an
-    output of the same size.
-    """
-
-    def __init__(self, attention_mask_func, init_method, 
-                 output_layer_init_method, layer_number):
-        args = get_args()
-
-        super(ParallelTransformerLayerPart2, self).__init__()
-        self.layer_number = layer_number
-
-        self.apply_residual_connection_post_layernorm \
-            = args.apply_residual_connection_post_layernorm
-
-        self.hidden_dropout = args.hidden_dropout
-        self.bias_dropout_fusion = args.bias_dropout_fusion
-
-        # Layernorm on the input data.
-        self.post_attention_layernorm = LayerNorm(
-            args.hidden_size,
-            eps=args.layernorm_epsilon)
-
-        # MLP
-        self.mlp = ParallelMLP(init_method,
-                               output_layer_init_method)
-
-
-    def forward(self, layernorm_input, attention_mask, presents=None, layer_past=None,
-                get_key_value=False):
-        # hidden_states: [b, s, h]
-
-        # Layer norm post the self attention.
-        layernorm_output = self.post_attention_layernorm(layernorm_input)
-
-        # MLP.
-        mlp_output, mlp_bias = self.mlp(layernorm_output)
-        
-        # Second residual connection.
-        if self.apply_residual_connection_post_layernorm:
-            residual = layernorm_output
-        else:
-            residual = layernorm_input
-
-        # jit scripting for a nn.module (with dropout) is not 
-        # trigerring the fusion kernel. For now, we use two 
-        # different nn.functional routines to account for varying
-        # dropout semantics during training and inference phases.
-        if self.bias_dropout_fusion:
-            if self.training:
-                bias_dropout_add_func = bias_dropout_add_fused_train
-            else:
-                bias_dropout_add_func = bias_dropout_add_fused_inference
-        else:
-            bias_dropout_add_func = get_bias_dropout_add(self.training)
-
-        #re-enable torch grad to enable fused optimization.
-        with torch.enable_grad():
-            output = bias_dropout_add_func(
-                mlp_output,
-                mlp_bias.expand_as(residual),
-                residual,
-                self.hidden_dropout)
-
-        if get_key_value:
-            output = [output, presents]
-
-        return output
-
 
 class ParallelTransformer(MegatronModule):
     """Transformer class."""

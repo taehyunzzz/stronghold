@@ -44,6 +44,9 @@ from megatron.utils import report_memory, flops_calculator
 import deepspeed
 from deepspeed.runtime.utils import see_memory_usage
 
+import torch.profiler as profiler
+from torch.profiler import profile, record_function, ProfilerActivity
+
 # for use 1-v100 server to mock 8-v100 server
 #torch.cuda.set_per_process_memory_fraction(1/8*1.1, 0)
 torch.cuda.empty_cache()
@@ -106,28 +109,31 @@ def pretrain(train_valid_test_dataset_provider, model_provider,
     timers.log(['model and optimizer', 'train/valid/test data iterators'])
     print_rank_0('training ...')
 
+
     iteration = 0
-    if args.do_train and args.train_iters > 0:
-        iteration = train(forward_step_func,
-                          model, optimizer, lr_scheduler,
-                          train_data_iterator, valid_data_iterator)
-    sys.exit(0)
+    prefix = 'the end of training for val data'
+    total_loss_dict = evaluate(forward_step_func, train_data_iterator, model, True)
 
-    if args.do_valid:
-        prefix = 'the end of training for val data'
-        evaluate_and_print_results(prefix, forward_step_func,
-                                   valid_data_iterator, model,
-                                   iteration, False)
+    # if args.do_train and args.train_iters > 0:
+    #     iteration = train(forward_step_func,
+    #                       model, optimizer, lr_scheduler,
+    #                       train_data_iterator, valid_data_iterator)
 
-    if args.save and iteration != 0:
-        save_checkpoint(iteration, model, optimizer, lr_scheduler)
+    # if args.do_valid:
+    #     prefix = 'the end of training for val data'
+    #     evaluate_and_print_results(prefix, forward_step_func,
+    #                                valid_data_iterator, model,
+    #                                iteration, False)
 
-    if args.do_test:
-        # Run on test data.
-        prefix = 'the end of training for test data'
-        evaluate_and_print_results(prefix, forward_step_func,
-                                   test_data_iterator, model,
-                                   0, True)
+    # if args.save and iteration != 0:
+    #     save_checkpoint(iteration, model, optimizer, lr_scheduler)
+
+    # if args.do_test:
+    #     # Run on test data.
+    #     prefix = 'the end of training for test data'
+    #     evaluate_and_print_results(prefix, forward_step_func,
+    #                                test_data_iterator, model,
+    #                                0, True)
 
 
 def get_model(model_provider_func):
@@ -141,7 +147,7 @@ def get_model(model_provider_func):
         # DeepSpeed handles CUDA, FP16, and DDP components.
         return model
 
-    # GPU allocation.
+    # GPU allocation. (?)
     model.cuda(torch.cuda.current_device())
 
     # Fp16 conversion.
@@ -479,8 +485,6 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
     while iteration < args.train_iters and \
         (args.train_tokens is None or args.tokens < args.train_tokens):
 
-        import torch.profiler as profiler
-        from torch.profiler import profile, record_function, ProfilerActivity
 
         if iteration == 0:
             do_profile = True
@@ -495,7 +499,7 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
                                                     model,
                                                     optimizer,
                                                     lr_scheduler)
-            prof.export_chrome_trace("trace/zo_train_iter{}_trace.json".format(iteration))
+            prof.export_chrome_trace("trace/train_iter{}_trace.json".format(iteration))
 
         else :
             loss_dict, skipped_iter = train_step(forward_step_func,
@@ -589,17 +593,19 @@ def evaluate(forward_step_func, data_iterator, model, verbose=False):
 
     with torch.no_grad():
         iteration = 0
-        while iteration < args.eval_iters:
-            iteration += 1
-            if verbose and iteration % args.log_interval == 0:
-                print_rank_0('Evaluating iter {}/{}'.format(iteration,
-                                                            args.eval_iters))
-            # Forward evaluation.
-            _, loss_dict = forward_step_func(data_iterator, model)
+        while iteration < 10 :
 
-            # When contiguous memory optimizations are enabled, the buffers
-            # allocated by the optimizations are deallocated during backward pass
-            # in the absence of backward pass the buffers should be reset after each
+            iteration += 1
+            # Forward evaluation.
+            if iteration == 10 :
+                with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    record_shapes=True, profile_memory=True) as prof:
+                    _, loss_dict = forward_step_func(data_iterator, model)
+                prof.export_chrome_trace("trace/train_iter{}_trace.json".format(iteration))
+
+            else :
+                _, loss_dict = forward_step_func(data_iterator, model)
+
             # forward pass
             if args.deepspeed and args.deepspeed_activation_checkpointing:
                 deepspeed.checkpointing.reset()
@@ -608,8 +614,6 @@ def evaluate(forward_step_func, data_iterator, model, verbose=False):
             for key in loss_dict:
                 total_loss_dict[key] = total_loss_dict.get(key, 0.) + \
                     loss_dict[key]
-    # Move model back to the train mode.
-    model.train()
 
     for key in total_loss_dict:
         total_loss_dict[key] /= args.eval_iters

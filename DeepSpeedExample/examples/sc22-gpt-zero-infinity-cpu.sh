@@ -27,17 +27,11 @@ config_json="$script_dir/ds_zero_stage_infinity-cpu.json"
 # Megatron Model Parallelism
 mp_size=1
 
-# NLAYERS=${1-24}
-# NHIDDEN=${2-2560}
-# HEADS=${3-16}
-# SEQ=${4-1024}
-# BATCHSIZE=${5-4}
-# LOGDIR="tensorboard_data/${NLAYERS}l_${NHIDDEN}h_${NNODES}n_${GPUS_PER_NODE}g_${mp_size}mp_${BATCHSIZE}b_ds4"
-NLAYERS=10
-NHIDDEN=1024
+NLAYERS=1
+NHIDDEN=256
 HEADS=16
-SEQ=1024
-BATCHSIZE=16
+SEQ=512
+BATCHSIZE=3
 LOGDIR="tensorboard_data/${NLAYERS}l_${NHIDDEN}h_${NNODES}n_${GPUS_PER_NODE}g_${mp_size}mp_${BATCHSIZE}b_ds4"
 
 #ZeRO Configs
@@ -95,7 +89,8 @@ gpt_options=" \
                 --zero-stage ${stage} \
                 --cpu-optimizer \
                 --zero-reduce-bucket-size ${rbs} \
-                --zero-allgather-bucket-size ${agbs} 
+                --zero-allgather-bucket-size ${agbs} \
+                --split-transformers
             "
 
 if [ "${contigious_gradients}" = "true" ]; then
@@ -141,7 +136,7 @@ fi
 full_options="${gpt_options} ${deepspeed_options} ${chkp_opt}"
 
 export PYTHONGIL=1
-run_cmd="deepspeed --num_nodes ${DLWS_NUM_WORKER} --num_gpus ${DLWS_NUM_GPU_PER_WORKER} pretrain_gpt2.py ${full_options}"
+run_cmd="deepspeed --master_port 8895 --include localhost:0 pretrain_gpt2.py ${full_options}"
 echo ${run_cmd}
 eval ${run_cmd}
 
